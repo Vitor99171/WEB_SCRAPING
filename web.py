@@ -1,11 +1,17 @@
+import sqlite3
+import re
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.options import Options
 from bs4 import BeautifulSoup
 import time
+
 # Solicitar ao usuário o termo de pesquisa para filtrar as vagas
 termo_pesquisa = input("Digite o título ou termo da vaga que você está procurando: ")
+
+# Remover caracteres especiais e espaços do termo de pesquisa para usar como nome da tabela
+nome_tabela = "vagas_de_" + re.sub(r'\W+', '_', termo_pesquisa.lower())
 
 # Inicializar o driver do Firefox com opções (como rodar em segundo plano se necessário)
 options = Options()
@@ -17,7 +23,8 @@ url = 'https://www.catho.com.br/vagas/'
 driver.get(url)
 
 # Tempo para a página carregar totalmente
-time.sleep(0)
+time.sleep(2)
+
 # Localizar o campo de pesquisa e inserir o termo fornecido
 campo_pesquisa = driver.find_element(By.ID, 'keyword')  # Usar o ID do campo de pesquisa
 campo_pesquisa.send_keys(termo_pesquisa)  # Inserir o termo no campo
@@ -39,8 +46,21 @@ driver.quit()
 # Encontrar as vagas (ajustar de acordo com a estrutura da página de resultados)
 vagas = soup.find_all('li', class_='search-result-custom_jobItem__OGz3a')
 
-# Lista para armazenar os dados das vagas
-dados_vagas = []
+# Conectar ao banco de dados SQLite (ou criar o arquivo caso não exista)
+conn = sqlite3.connect('vagas.db')
+cursor = conn.cursor()
+
+# Criar a tabela dinamicamente com base no termo de pesquisa (se ela não existir)
+cursor.execute(f'''
+CREATE TABLE IF NOT EXISTS {nome_tabela} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo TEXT,
+    empresa TEXT,
+    salario TEXT,
+    localizacao TEXT,
+    data_publicacao TEXT
+)
+''')
 
 # Percorrer cada vaga e extrair as informações
 for vaga in vagas:
@@ -64,23 +84,17 @@ for vaga in vagas:
     data_publicacao_element = vaga.find('time')
     data_publicacao = data_publicacao_element.text.strip() if data_publicacao_element else 'Data não disponível'
 
-    # Armazenar as informações extraídas
-    dados_vagas.append({
-        'Título': titulo,
-        'Empresa': empresa,
-        'Salário': salario,
-        'Localização': localizacao,
-        'Data de Publicação': data_publicacao
-    })
+    # Inserir os dados da vaga no banco de dados
+    cursor.execute(f'''
+    INSERT INTO {nome_tabela} (titulo, empresa, salario, localizacao, data_publicacao)
+    VALUES (?, ?, ?, ?, ?)
+    ''', (titulo, empresa, salario, localizacao, data_publicacao))
 
-# Exibir as vagas filtradas
-if dados_vagas:
-    for vaga in dados_vagas:
-        print(f"Título: {vaga['Título']}")
-        print(f"Empresa: {vaga['Empresa']}")
-        print(f"Salário: {vaga['Salário']}")
-        print(f"Localização: {vaga['Localização']}")
-        print(f"Data de Publicação: {vaga['Data de Publicação']}")
-        print('-' * 40)
-else:
-    print(f"Nenhuma vaga encontrada para o termo: {termo_pesquisa}")
+    # Commitar a inserção ao banco
+    conn.commit()
+
+# Fechar a conexão com o banco de dados
+conn.close()
+
+# Exibir uma mensagem de confirmação
+print(f"As vagas relacionadas ao termo '{termo_pesquisa}' foram salvas na tabela '{nome_tabela}' do banco de dados SQLite.")
